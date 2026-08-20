@@ -9,7 +9,7 @@
 #pragma once
 
 #include "agribot_vs.h"
-#include <rosgraph_msgs/Clock.h>
+#include <rosgraph_msgs/msg/clock.hpp>
 
 using namespace cv;
 using namespace std;
@@ -27,7 +27,7 @@ class AgribotVSNodeHandler {
    * 
    * @param node_handler 
    */
-  AgribotVSNodeHandler(ros::NodeHandle& node_handler);
+  AgribotVSNodeHandler(rclcpp::Node::SharedPtr node_handler);
   /**
    * @brief Destroy the Agribot V S Node Handler object
    * 
@@ -40,31 +40,31 @@ class AgribotVSNodeHandler {
    */
   void CropRow_Tracking(camera& src);
 
-  void imuCallBack(const sensor_msgs::Imu::ConstPtr& msg);
+  void imuCallBack(const sensor_msgs::msg::Imu::ConstSharedPtr& msg);
   /**
    * @brief gets front camera's image
    * 
    * @param msg 
    */
-  void imageFrontCalllBack(const sensor_msgs::ImageConstPtr& msg);
+  void imageFrontCalllBack(const sensor_msgs::msg::Image::ConstSharedPtr& msg);
   /**
    * @brief gets rear camera's image
    * 
    * @param msg 
    */
-  void imageBackCalllBack(const sensor_msgs::ImageConstPtr& msg);
+  void imageBackCalllBack(const sensor_msgs::msg::Image::ConstSharedPtr& msg);
   /**
    * @brief gets the robot odometry from base controller
    * 
    * @param msg 
    */
-  void odomCallBack(const nav_msgs::Odometry::ConstPtr& msg);
+  void odomCallBack(const nav_msgs::msg::Odometry::ConstSharedPtr& msg);
   /**
    * @brief gets the poseof the robot in Lab from Mocap system
    * 
    * @param msg 
    */
-  void amclPoseCallBack(const geometry_msgs::PoseStamped& msg);
+  void amclPoseCallBack(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& msg);
   /**
    * @brief stops the robot fror given time
    * 
@@ -77,9 +77,9 @@ class AgribotVSNodeHandler {
    * @param _in 
    */
   void publishVelocity(int _in=1);
-  // void dynamicReconfig_callback(visual_crop_row_navigation::AgribotVSConfig &config, uint32_t level);
+  // void dynamicReconfig_callback(visual_crop_row_navigation_ros2::AgribotVSConfig &config, uint32_t level);
 
-  ros::Publisher Time_pub;
+  rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr Time_pub;
   AgribotVS agribotVS;
 
  private:
@@ -87,18 +87,18 @@ class AgribotVSNodeHandler {
   int state, in_state;
 
   // ROS node handle.
-  ros::NodeHandle nodeHandle_;
+  rclcpp::Node::SharedPtr nodeHandle_;
 
-  ros::Subscriber image_front_sub;
-  ros::Subscriber image_back_sub;
-  ros::Subscriber Mocap_sub;
-  ros::Subscriber Odom_sub;
-  ros::Subscriber IMU_sub;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_front_sub;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_back_sub;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr Mocap_sub;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr Odom_sub;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr IMU_sub;
   
   double mocap_roll, mocap_pitch, mocap_yaw;
   double imu_roll, imu_pitch, imu_yaw;
-  ros::Publisher Log_pub;
-  ros::Publisher VSVelocityPub;
+  rclcpp::Publisher<visual_crop_row_navigation_ros2::msg::VsMsg>::SharedPtr Log_pub;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr VSVelocityPub;
   
 
 };

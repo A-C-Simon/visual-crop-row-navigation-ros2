@@ -8,16 +8,16 @@
 
 #pragma once
 
-#include "ros/ros.h"
+#include "rclcpp/rclcpp.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 #include <iostream>
 #include <string>
-#include <vector>
-#include <algorithm> 
-#include <iterator>  
+#include <algorithm>
+#include <iterator>
+#include <type_traits>
 
 #include "cv_bridge/cv_bridge.h"
 #include "opencv2/highgui/highgui.hpp"
@@ -25,22 +25,17 @@
 #include <opencv2/core/utility.hpp>
 #include <opencv2/opencv.hpp>
 
-#include "sensor_msgs/Image.h"
-#include <geometry_msgs/Twist.h>
-#include <image_transport/image_transport.h>
-#include <tf/transform_broadcaster.h>
-#include <geometry_msgs/PoseStamped.h>
-#include <tf/transform_broadcaster.h>
-#include "nav_msgs/Odometry.h"
-#include "sensor_msgs/Imu.h"
+#include "sensor_msgs/msg/image.hpp"
+#include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "nav_msgs/msg/odometry.hpp"
+#include "sensor_msgs/msg/imu.hpp"
 
-#include <eigen3/Eigen/Dense>
-#include <eigen3/Eigen/QR> 
+#include <Eigen/Dense>
+#include <Eigen/QR>
 #include <Eigen/Geometry>
 
-#include <dynamic_reconfigure/server.h>
-
-#include "visual_crop_row_navigation/vs_msg.h"
+#include "visual_crop_row_navigation_ros2/msg/vs_msg.hpp"
 #include "agribot_types.h"
 
 #define DEG2RAD 0.0174533
@@ -78,7 +73,7 @@ class AgribotVS {
    * @return true - in case of loading all params
    * @return false - in case of failure
    */
-  bool readRUNParmas(ros::NodeHandle& nodeHandle_);
+  bool readRUNParmas(rclcpp::Node::SharedPtr nodeHandle_);
   /**
    * @brief - detects features(contours in specific range of color) from inpout image
    * 
@@ -282,7 +277,7 @@ class AgribotVS {
    * @return Point2f output image in origin coordinate system
    */
   Point2f image2origin(Point2f& xc);
-  std::vector<double> getEulerAngles(const nav_msgs::Odometry::ConstPtr& Pose);
+  std::vector<double> getEulerAngles(const nav_msgs::msg::Odometry::ConstSharedPtr& Pose);
 
   // This file defines the controller parameters
   camera front_cam;
@@ -290,7 +285,7 @@ class AgribotVS {
 
   int max_row_num;
 
-  visual_crop_row_navigation::vs_msg VSMsg;
+  visual_crop_row_navigation_ros2::msg::VsMsg VSMsg;
 
   double rho_b;
   double rho_f;
@@ -348,8 +343,8 @@ class AgribotVS {
   bool publish_cmd_vel,publish_linear_vel;
 
 
-  geometry_msgs::Twist VelocityMsg;
-  sensor_msgs::Imu imu;
+  geometry_msgs::msg::Twist VelocityMsg;
+  sensor_msgs::msg::Imu imu;
   vector<double> RobotPose;
   vector<double> RobotLinearVelocities;
   vector<double> RobotAngularVelocities;

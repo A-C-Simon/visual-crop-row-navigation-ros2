@@ -8,8 +8,8 @@
 
 #pragma once
 #include <vector>
-#include <eigen3/Eigen/Dense>
-#include <opencv2/core/core.hpp>
+#include <Eigen/Dense>
+#include <opencv2/core.hpp>
 
 using namespace cv;
 using namespace std;

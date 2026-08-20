@@ -58,36 +58,36 @@ A complete Gazebo simulation package is provided in [agribot_robot](https://gith
 
 ## Dependencies
 
-- c++11
-- catkin
-- opencv >= 2.4
+- c++17
+- ROS2 (tested with Humble)
+- opencv >= 3
 - Eigen >= 3.3
 
 ## How to build and run
 
-1. Clone the package into your *catkin_ws*
+1. Clone the package into your *ros2_ws*
 ```bash
-cd ~/catkin_ws/src
-git clone https://github.com/PRBonn/visual_crop_row_navigation.git
+cd ~/ros2_ws/src
+git clone https://github.com/PRBonn/visual_crop_row_navigation.git visual-crop-row-navigation_ros2
 ```
 2. Build the package
 ```bash
-cd ~/catkin_ws
-catkin build visual_crop_row_navigation
+cd ~/ros2_ws
+colcon build --packages-select visual_crop_row_navigation_ros2
+source install/setup.bash
 ```
-3. Run ROS driver to stream images from the robot's cameras, for example using [usb_cam](http://wiki.ros.org/usb_cam)
-<!-- ```
-* /front/rgb/image_raw [image]
-* /back/rgb/image_raw [image]
-``` -->
+3. Install the USB camera driver (ROS2 version of usb_cam)
+```bash
+sudo apt install ros-humble-usb-cam
+```
 4. Run visual servoing navigation
 ```bash
-roslaunch visual_crop_row_navigation visualservoing.launch
+ros2 launch visual_crop_row_navigation_ros2 visualservoing.launch
 ```
 
 Successfully tested using:
-- Ubuntu 16.04
-- ROS kinetic
+- Ubuntu 22.04
+- ROS2 Humble
 
 ## Test data
 

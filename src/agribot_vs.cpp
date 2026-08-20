@@ -8,6 +8,10 @@
 
 #include "agribot_vs.h"
 
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+
 using namespace cv;
 using namespace std;
 using namespace Eigen;
@@ -31,85 +35,113 @@ namespace agribot_vs{
 
     navigation_dir = 1;
 
+    center_min_off = 0;
+    center_max_off = 0;
+
 
     F_des << 0,0,0;
     F << 0,0,0;
   }
   AgribotVS::~AgribotVS(){
   };
-  bool AgribotVS::readRUNParmas(ros::NodeHandle& nodeHandle_) {
+  bool AgribotVS::readRUNParmas(rclcpp::Node::SharedPtr nodeHandle_) {
 
-    nodeHandle_.param("/agribot_vs/min_frame", min_frame, 15);
+    auto get_param = [&](const std::string& name, auto& var, auto def) {
+      if (!nodeHandle_->has_parameter(name)) {
+        nodeHandle_->declare_parameter(name, def);
+      }
+      rclcpp::Parameter p = nodeHandle_->get_parameter(name);
+      if (p.get_type() == rclcpp::ParameterType::PARAMETER_NOT_SET) {
+        var = def;
+        return;
+      }
+      using V = std::remove_reference_t<decltype(var)>;
+      if constexpr (std::is_same_v<V, bool>) {
+        var = p.as_bool();
+      } else if constexpr (std::is_same_v<V, double>) {
+        var = p.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER ?
+              static_cast<double>(p.as_int()) : p.as_double();
+      } else if constexpr (std::is_same_v<V, int>) {
+        var = p.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE ?
+              static_cast<int>(p.as_double()) : static_cast<int>(p.as_int());
+      } else {
+        var = p.as_string();
+      }
+    };
+
+    get_param("min_frame", min_frame, 15);
     
-    nodeHandle_.param("/agribot_vs/coef", coef, 60.0);
+    get_param("coef", coef, 60.0);
 
-    nodeHandle_.param("/agribot_vs/ex_Xc", ex_Xc, 640);
-    nodeHandle_.param("/agribot_vs/ex_Yc", ex_Yc, 360);
-    nodeHandle_.param("/agribot_vs/nh_offset", nh_offset, 200);
-    nodeHandle_.param("/agribot_vs/nh_L", nh_L, 150);
-    nodeHandle_.param("/agribot_vs/nh_H", nh_H, 250);
+    get_param("ex_Xc", ex_Xc, 640);
+    get_param("ex_Yc", ex_Yc, 360);
+    get_param("nh_offset", nh_offset, 200);
+    get_param("nh_L", nh_L, 150);
+    get_param("nh_H", nh_H, 250);
 
-    nodeHandle_.param("/agribot_vs/minContourSize", minContourSize, 8.0);
+    get_param("minContourSize", minContourSize, 8.0);
     
-    nodeHandle_.param("/agribot_vs/max_row_num", max_row_num, 80);
+    get_param("max_row_num", max_row_num, 80);
 
-    nodeHandle_.param("/agribot_vs/mode", mode, 1);
+    get_param("mode", mode, 1);
 
-    nodeHandle_.param("/agribot_vs/mask_tune", mask_tune, false);
-    nodeHandle_.param("/agribot_vs/single_camera_mode", single_camera_mode, false);
+    get_param("mask_tune", mask_tune, false);
+    get_param("single_camera_mode", single_camera_mode, false);
 
-    nodeHandle_.param("/agribot_vs/z_min", z_min, 0.15);
+    get_param("z_min", z_min, 0.15);
 
-    nodeHandle_.param("/agribot_vs/w_min", w_min, 0.015);
-    nodeHandle_.param("/agribot_vs/w_max", w_max, 0.15);
-    nodeHandle_.param("/agribot_vs/vf_des", vf_des, 0.05);
-    nodeHandle_.param("/agribot_vs/vb_des", vb_des, 0.05);
+    get_param("w_min", w_min, 0.015);
+    get_param("w_max", w_max, 0.15);
+    get_param("vf_des", vf_des, 0.05);
+    get_param("vb_des", vb_des, 0.05);
 
-    nodeHandle_.param("/agribot_vs/ty", ty, 0.1);
-    nodeHandle_.param("/agribot_vs/tz", tz, 1.034);
+    get_param("ty", ty, 0.1);
+    get_param("tz", tz, 1.034);
 
-    nodeHandle_.param("/agribot_vs/rho_f", rho_f, -70.0);
-    nodeHandle_.param("/agribot_vs/rho_b", rho_b, -40.0);
+    get_param("rho_f", rho_f, -70.0);
+    get_param("rho_b", rho_b, -40.0);
     
-    nodeHandle_.param("/agribot_vs/camera_ID", camera_ID, 1);
-    nodeHandle_.param("/agribot_vs/maskTuneCamera", maskTuneCamera, 1);
-    nodeHandle_.param("/agribot_vs/fps", fps, 1);
+    get_param("camera_ID", camera_ID, 1);
+    get_param("maskTuneCamera", maskTuneCamera, 1);
+    get_param("fps", fps, 1);
 
-    nodeHandle_.param("/agribot_vs/lambda_x_1", lambda_x_1, 1.0);
-    nodeHandle_.param("/agribot_vs/lambda_w_1", lambda_w_1, 1.0);
+    get_param("lambda_x_1", lambda_x_1, 1.0);
+    get_param("lambda_w_1", lambda_w_1, 1.0);
 
-    nodeHandle_.param("/agribot_vs/lambda_x_2", lambda_x_2, 1.0);
-    nodeHandle_.param("/agribot_vs/lambda_w_2", lambda_w_2, 1.0);
+    get_param("lambda_x_2", lambda_x_2, 1.0);
+    get_param("lambda_w_2", lambda_w_2, 1.0);
 
-    nodeHandle_.param("/agribot_vs/lambda_x_3", lambda_x_3, 1.0);
-    nodeHandle_.param("/agribot_vs/lambda_w_3", lambda_w_3, 1.0);
+    get_param("lambda_x_3", lambda_x_3, 1.0);
+    get_param("lambda_w_3", lambda_w_3, 1.0);
 
-    nodeHandle_.param("/agribot_vs/lambda_x_4", lambda_x_4, 1.0);
-    nodeHandle_.param("/agribot_vs/lambda_w_4", lambda_w_4, 1.0);
+    get_param("lambda_x_4", lambda_x_4, 1.0);
+    get_param("lambda_w_4", lambda_w_4, 1.0);
 
-    nodeHandle_.param("/agribot_vs/height", height, 720);
-    nodeHandle_.param("/agribot_vs/width", width, 1280);
+    get_param("height", height, 720);
+    get_param("width", width, 1280);
 
-    nodeHandle_.param("/agribot_vs/drive_forward", drive_forward, true);
-    nodeHandle_.param("/agribot_vs/turning_mode", turning_mode, false);
-    nodeHandle_.param("/agribot_vs/steering_dir", steering_dir, 1);
-    nodeHandle_.param("/agribot_vs/driving_dir", driving_dir, 1);
+    get_param("drive_forward", drive_forward, true);
+    get_param("turning_mode", turning_mode, false);
+    get_param("steering_dir", steering_dir, 1);
+    get_param("driving_dir", driving_dir, 1);
 
-    nodeHandle_.param("/agribot_vs/min_points_switch", min_points_switch, 15);
+    get_param("min_points_switch", min_points_switch, 15);
     
-    nodeHandle_.param("/agribot_vs/publish_cmd_vel", publish_cmd_vel, true);
-    nodeHandle_.param("/agribot_vs/publish_linear_vel", publish_linear_vel, true);
+    get_param("publish_cmd_vel", publish_cmd_vel, true);
+    get_param("publish_linear_vel", publish_linear_vel, true);
 
-    nodeHandle_.param("/agribot_vs/max_Hue", max_Hue, 80);
-    nodeHandle_.param("/agribot_vs/min_Hue", min_Hue, 10);
+    get_param("max_Hue", max_Hue, 80);
+    get_param("min_Hue", min_Hue, 10);
 
-    nodeHandle_.param("/agribot_vs/max_Saturation", max_Saturation, 255);
-    nodeHandle_.param("/agribot_vs/min_Saturation", min_Saturation, 100);
+    get_param("max_Saturation", max_Saturation, 255);
+    get_param("min_Saturation", min_Saturation, 100);
 
-    nodeHandle_.param("/agribot_vs/max_Value", max_Value, 255);
-    nodeHandle_.param("/agribot_vs/min_Value", min_Value, 100);
+    get_param("max_Value", max_Value, 255);
+    get_param("min_Value", min_Value, 100);
 
-    nodeHandle_.param("/agribot_vs/Scale", Scale, 0.5);
+    get_param("Scale", Scale, 0.5);
+
+    get_param("LineFitting_method", LineFitting_method, 1);
 
     cout << "Run parameters loading ..." << endl;
 
@@ -122,7 +154,7 @@ namespace agribot_vs{
     Mat img = camera.image;
     // // convert to HSV color space
     cv::Mat hsvImage;
-    cv::cvtColor(img, hsvImage, CV_BGR2HSV);
+    cv::cvtColor(img, hsvImage, cv::COLOR_BGR2HSV);
     // split the channels
     std::vector<cv::Mat> hsvChannels;
     cv::split(hsvImage, hsvChannels);
@@ -145,8 +177,8 @@ namespace agribot_vs{
     RNG rng(12345);
 
     // finds cluster/contour in the image
-    findContours(hueMask, contours, hierarchy, CV_RETR_TREE,
-                CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
+    findContours(hueMask, contours, hierarchy, cv::RETR_TREE,
+                cv::CHAIN_APPROX_SIMPLE, Point(0, 0));
 
     // Draw contours
     img_contour = Mat::zeros(hueMask.size(), CV_8UC3);
@@ -178,7 +210,7 @@ namespace agribot_vs{
     for (size_t i = 0; i < contours.size(); i++) {
       approxPolyDP(Mat(contours[i]), contours_poly[i], 2, true);
       minEnclosingCircle((Mat)contours_poly[i], center[i], radius[i]);
-      cv::circle(img, Point(center[i].x, center[i].y),3, Scalar(51, 204, 51),CV_FILLED, 8,0);
+      cv::circle(img, Point(center[i].x, center[i].y),3, Scalar(51, 204, 51),cv::FILLED, 8,0);
     }
     return center;
   }
@@ -212,7 +244,7 @@ namespace agribot_vs{
    
     if(ContourCenters.size() > 0 ){
       Vec4f linefit;
-      cv::fitLine(ContourCenters,linefit,CV_DIST_L2,0,0.01,0.01);
+      cv::fitLine(ContourCenters,linefit,cv::DIST_L2,0,0.01,0.01);
 
       P1.x = linefit[0] + linefit[2];
       P1.y = linefit[1] + linefit[3];
@@ -250,7 +282,7 @@ namespace agribot_vs{
 
       MatrixXf R_out(2,2);
       R_out = is_in_image_point(R);
-      cv::line(img, Point(R_out(0,0), R_out(0,1)),Point(R_out(1,0), R_out(1,1)), Scalar(0, 0, 255), 1, CV_AA);
+      cv::line(img, Point(R_out(0,0), R_out(0,1)),Point(R_out(1,0), R_out(1,1)), Scalar(0, 0, 255), 1, cv::LINE_AA);
       AvgLine[0][0] =R_out(0,0);
       AvgLine[0][1] =R_out(0,1);
       AvgLine[0][2] =R_out(1,0);
@@ -386,8 +418,8 @@ namespace agribot_vs{
     I.nh.Yc = (I.nh_ex[0].y + I.nh_ex[1].y)/2;
 
     // computes intersection side
-    cv::circle(I.image, Point(P.x, P.y),8, Scalar(0,0,255),CV_FILLED, 12,0);
-    cv::circle(I.image, Point(Q.x, Q.y),8, Scalar(0,255,255),CV_FILLED, 12,0);
+    cv::circle(I.image, Point(P.x, P.y),8, Scalar(0,0,255),cv::FILLED, 12,0);
+    cv::circle(I.image, Point(Q.x, Q.y),8, Scalar(0,255,255),cv::FILLED, 12,0);
 
     // compute Theta
     float Theta = compute_Theta(P,Q);
@@ -703,13 +735,13 @@ namespace agribot_vs{
     }
       return angle;
   }
-  std::vector<double> AgribotVS::getEulerAngles(const nav_msgs::Odometry::ConstPtr& Pose) {
+  std::vector<double> AgribotVS::getEulerAngles(const nav_msgs::msg::Odometry::ConstSharedPtr& Pose) {
     std::vector<double> EulerAngles;
     EulerAngles.resize(3, 0);
-    tf::Quaternion q(Pose->pose.pose.orientation.x, Pose->pose.pose.orientation.y,
+    tf2::Quaternion q(Pose->pose.pose.orientation.x, Pose->pose.pose.orientation.y,
                     Pose->pose.pose.orientation.z,
                     Pose->pose.pose.orientation.w);
-    tf::Matrix3x3 m(q);
+    tf2::Matrix3x3 m(q);
     m.getRPY(EulerAngles[0], EulerAngles[1], EulerAngles[2]);
     return EulerAngles;
   }

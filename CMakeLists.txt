@@ -1,74 +1,93 @@
-cmake_minimum_required(VERSION 2.8.3)
-project(visual_crop_row_navigation)
+cmake_minimum_required(VERSION 3.8)
+project(visual_crop_row_navigation_ros2)
 
-# c++11
-set(CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra)
+endif()
 
-find_package(catkin REQUIRED COMPONENTS
-  roscpp
-  genmsg
-  cmake_modules 
-  message_generation
-  dynamic_reconfigure 
-  std_msgs
-  cv_bridge
-  sensor_msgs
-  image_transport
-)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package( PkgConfig )
-find_package( OpenCV REQUIRED )
-
-add_message_files(FILES vs_msg.msg)
-
-generate_messages(DEPENDENCIES std_msgs)
-
-set (CMAKE_CXX_STANDARD 11)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -fPIC")
-set(CMAKE_CXX_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
-find_package (Eigen3 3.3 REQUIRED NO_MODULE)
-pkg_check_modules( EIGEN3 REQUIRED eigen3 )
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 
-include_directories( 
-  include
-  ${catkin_INCLUDE_DIRS}
-  ${EIGEN3_INCLUDE_DIRS} 
+find_package(OpenCV REQUIRED)
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/VsMsg.msg"
+  DEPENDENCIES std_msgs
 )
 
-catkin_package(
-  INCLUDE_DIRS
-    include
-  LIBRARIES
-    ${PROJECT_NAME}_core
-  CATKIN_DEPENDS
-    sensor_msgs
-    std_msgs
-    message_runtime
-)
+include_directories(include)
 
 ## Declare a cpp library
-add_library(${PROJECT_NAME}_core
-   src/agribot_vs.cpp
+add_library(${PROJECT_NAME}_core STATIC src/agribot_vs.cpp)
+target_include_directories(${PROJECT_NAME}_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${OpenCV_INCLUDE_DIRS}
 )
+ament_target_dependencies(${PROJECT_NAME}_core
+  rclcpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  nav_msgs
+  cv_bridge
+  tf2
+  tf2_geometry_msgs
+)
+target_link_libraries(${PROJECT_NAME}_core ${OpenCV_LIBS} Eigen3::Eigen)
+rosidl_get_typesupport_target(cpp_typesupport_target
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(${PROJECT_NAME}_core "${cpp_typesupport_target}")
 
 ## Declare cpp executables
 add_executable(agribot_vs_node
   src/agribot_vs_node.cpp
   src/agribot_vs_nodehandler.cpp
 )
-
+target_include_directories(agribot_vs_node PRIVATE
+  include
+  ${OpenCV_INCLUDE_DIRS}
+)
+ament_target_dependencies(agribot_vs_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  nav_msgs
+  rosgraph_msgs
+  cv_bridge
+  tf2
+  tf2_geometry_msgs
+)
 target_link_libraries(agribot_vs_node
   ${PROJECT_NAME}_core
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBS} 
-	Eigen3::Eigen
+  ${OpenCV_LIBS}
+  Eigen3::Eigen
+)
+target_link_libraries(agribot_vs_node "${cpp_typesupport_target}")
+
+install(TARGETS agribot_vs_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(DIRECTORY launch params
+  DESTINATION share/${PROJECT_NAME}
 )
 
-add_dependencies(agribot_vs_node ${${PROJECT_NAME}_EXPORTED_TARGETS})
-add_dependencies(${PROJECT_NAME}_core ${${PROJECT_NAME}_EXPORTED_TARGETS})
-
+ament_package()

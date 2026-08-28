@@ -46,12 +46,25 @@ agribot_vs:
     height: 480
     # default position of tracking windows
     ex_Xc: 320
-    ex_Yc: 240
+    ex_Yc: 380
     # default size of tracking windows
-    nh_L: 120
-    nh_H: 250
+    nh_L: 80
+    nh_H: 180
     # ???
     nh_offset: 200
+    # Isolation Forest inside window (anomaly removal before fitLine)
+    iso_enabled: true
+    iso_contamination: 0.15
+    iso_min_points: 12
+    iso_n_estimators: 100
+    # Column-aware window spawning (dynamic Xc/L near chassis)
+    colaware_enabled: true
+    colaware_y0_frac: 0.55
+    # Gap-based multi-row filter inside window (keep central cluster)
+    gap_enabled: true
+    gap_eps: 14
+    gap_min_samples: 6
+    gap_min_points: 12
     # min point where sate controller will switch the mode inside the tracking windows
     min_points_switch: 10
     # min point where sate controller will switch the mode inside image

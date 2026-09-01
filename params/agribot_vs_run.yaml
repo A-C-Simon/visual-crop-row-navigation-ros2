@@ -60,8 +60,8 @@ agribot_vs:
     # Column-aware window spawning (dynamic Xc/L near chassis)
     colaware_enabled: true
     colaware_y0_frac: 0.55
-    # Gap-based multi-row filter inside window (keep central cluster)
-    gap_enabled: true
+    # Gap-based multi-row filter inside window (keep central cluster) - DISABLED per user request, stick to Isolation Forest only
+    gap_enabled: false
     gap_eps: 14
     gap_min_samples: 6
     gap_min_points: 12

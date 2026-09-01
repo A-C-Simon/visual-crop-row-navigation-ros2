@@ -30,7 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import yaml
 from sklearn.ensemble import IsolationForest
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, KMeans
 
 # ---------------------------------------------------------------------------
 # params
@@ -223,58 +223,78 @@ def detect_column_aware_window(combined_mask, centers, params, width, height):
         L_dynamic = params["nh_L"]
     return Xc, L_dynamic, H, profile, prof_smooth, peak_xs, chosen_idx, median_gap, y0
 
-def filter_gap_clusters(points, Xc, params):
+def filter_gap_clusters(points, Xc, Yc, H, params):
     """
-    Gap-based multi-row filter inside window.
-    If window contains 2+ row clusters separated by a uniform gap, keep only the cluster
-    whose x-median is closest to Xc (window centre, or robot base). Uses DBSCAN on x.
+    Gap-based multi-row filter inside window - KMeans K=2 - Strategy 2 Closest to Center (Anti-Crop-Killer).
+    If window contains 2 row clusters separated by a uniform gap, keep only the cluster whose centroid
+    is closest to the bottom-center of the sliding window (rover nose, Xc, Yc+H/2), not just Xc.
+    Calculates geometric center of all dots, runs KMeans K=2 on x, finds centroids, measures Euclidean
+    distance to bottom-center. Keeps the cluster on the row the rover is physically driving on.
     Returns (kept_points, removed_points, n_clusters, labels, gap_info)
-    gap_info: dict with eps, n_clusters, kept_id, median_xs, gaps
     """
     if not params.get("gap_enabled", True):
         return points, [], 1, None, {"reason": "disabled"}
     if len(points) < params.get("gap_min_points", 12):
         return points, [], 1, None, {"reason": f"n<{params.get('gap_min_points',12)}"}
     X = np.array([p[0] for p in points], dtype=float).reshape(-1,1)
-    # also consider y? Use x only to detect lateral gap; y spread is vertical, not gap.
-    eps = float(params.get("gap_eps", 14))
-    min_s = int(params.get("gap_min_samples", 6))
-    # DBSCAN on x
-    db = DBSCAN(eps=eps, min_samples=min_s).fit(X)
-    labels = db.labels_  # -1 noise
+    # geometric center of all dots (for logging, rover window center reference)
+    all_cx = float(np.mean([p[0] for p in points]))
+    all_cy = float(np.mean([p[1] for p in points]))
+    # bottom-center of sliding window (rover nose): Xc, Yc+H/2
+    # Yc and H are passed for Strategy 2
+    bottom_cx = float(Xc)
+    bottom_cy = float(Yc + H/2.0)
+    # KMeans K=2 on x (lateral separation)
+    try:
+        kmeans = KMeans(n_clusters=2, n_init=10, random_state=42).fit(X)
+        labels = kmeans.labels_
+    except Exception as e:
+        return points, [], 1, None, {"reason": f"kmeans failed {e}"}
     uniq = sorted(set(labels))
-    # count clusters excluding noise
-    clusters = [c for c in uniq if c != -1]
-    n_clusters = len(clusters)
-    if n_clusters <= 1:
-        # No gap: single row or all noise -> keep all
-        return points, [], n_clusters if n_clusters else 1, labels, {"eps": eps, "n_clusters": n_clusters}
-    # Compute median x per cluster
+    n_clusters = len(uniq)
+    if n_clusters != 2:
+        return points, [], 1, labels, {"n_clusters": n_clusters, "all_center": (all_cx, all_cy), "bottom_center": (bottom_cx, bottom_cy)}
+    # per-cluster centroids (mean x,y) and sizes
+    centroids = {}
     medians = {}
     sizes = {}
-    for c in clusters:
-        xs = X[labels==c].ravel()
+    stds = {}
+    for c in uniq:
+        pts_c = [p for p,lb in zip(points, labels) if lb==c]
+        xs = np.array([p[0] for p in pts_c], dtype=float)
+        ys = np.array([p[1] for p in pts_c], dtype=float)
+        centroids[c] = (float(np.mean(xs)), float(np.mean(ys)))
         medians[c] = float(np.median(xs))
-        sizes[c] = int((labels==c).sum())
-    # Also noise points are outliers (scattered weeds) – they will be removed anyway by IF, but gap filter will keep them as not in kept cluster
-    # Choose central cluster: closest median to Xc
-    dists = {c: abs(m - Xc) for c,m in medians.items()}
-    # Prefer larger cluster if distances tie within 8px: choose larger
-    # Sort by distance, then by -size
-    sorted_c = sorted(clusters, key=lambda c: (dists[c], -sizes[c]))
+        sizes[c] = int(len(pts_c))
+        stds[c] = float(np.std(xs)) if len(xs)>1 else 0.0
+    # gap between medians (uniform gap)
+    c0, c1 = uniq[0], uniq[1]
+    gap = abs(medians[c0] - medians[c1])
+    avg_std = (stds[c0] + stds[c1]) / 2.0
+    L = params.get("nh_L", 80)
+    thresh = max(18.0, float(params.get("gap_eps", 14)), 2.0*avg_std + 4.0, float(L)*0.30)
+    min_size_ratio = 0.15
+    small_ratio = min(sizes.values()) / max(1, len(points))
+    if gap < thresh or small_ratio < min_size_ratio:
+        return points, [], 1, labels, {"n_clusters": 1, "gap": gap, "thresh": thresh, "medians": medians, "sizes": sizes, "stds": stds, "centroids": centroids, "all_center": (all_cx, all_cy), "bottom_center": (bottom_cx, bottom_cy), "reason": f"gap {gap:.0f} < thresh {thresh:.0f} or small_ratio {small_ratio:.2f} -> single row"}
+    # Strategy 2: keep cluster whose centroid is closest to bottom-center (rover nose)
+    dists = {}
+    for c in uniq:
+        cx, cy = centroids[c]
+        dists[c] = float(np.hypot(cx - bottom_cx, cy - bottom_cy))
+    # also compute distance to geometric center for logging
+    dists_to_all = {c: float(np.hypot(centroids[c][0]-all_cx, centroids[c][1]-all_cy)) for c in uniq}
+    sorted_c = sorted(uniq, key=lambda c: (dists[c], -sizes[c]))
     kept = sorted_c[0]
+    kept_centroid = centroids[kept]
     kept_median = medians[kept]
-    # Also compute gap between clusters for debug: sorted medians gaps
-    sorted_meds = sorted(medians.values())
-    gaps = np.diff(sorted_meds).tolist() if len(sorted_meds)>=2 else []
-    max_gap = max(gaps) if gaps else 0
-    # Build kept/removed
-    kept_points = [p for p,lb in zip(points, labels) if lb==kept]
-    removed = [p for p,lb in zip(points, labels) if lb!=kept]  # includes other clusters + noise
-    info = {"eps": eps, "n_clusters": n_clusters, "kept": kept, "kept_median": kept_median,
-            "medians": medians, "sizes": sizes, "gaps": gaps, "max_gap": max_gap,
-            "labels": labels}
-    return kept_points, removed, n_clusters, labels, info
+    removed = [p for p,lb in zip(points, labels) if lb != kept]
+    kept_points = [p for p,lb in zip(points, labels) if lb == kept]
+    info = {"n_clusters": 2, "gap": gap, "thresh": thresh, "kept": kept, "kept_centroid": kept_centroid,
+            "kept_median": kept_median, "medians": medians, "sizes": sizes, "stds": stds,
+            "centroids": centroids, "dists_bottom": dists, "dists_all": dists_to_all,
+            "all_center": (all_cx, all_cy), "bottom_center": (bottom_cx, bottom_cy), "labels": labels, "L": L}
+    return kept_points, removed, 2, labels, info
 
 # ---------------------------------------------------------------------------
 # debug composite
@@ -304,11 +324,10 @@ def save_debug_composite(path: Path, bgr_orig: np.ndarray, intermediates: dict,
     n_iso_in = intermediates.get("n_iso_in", n_nh)
     n_iso_out = intermediates.get("n_iso_out", 0)
     iso_applied = intermediates.get("iso_applied", False)
-    gap_img = intermediates.get("gap_img", iso_img)
+    # gap filter removed - keep for compatibility but not used
     n_gap_in = intermediates.get("n_gap_in", n_iso_in)
     n_gap_out = intermediates.get("n_gap_out", 0)
     gap_n_clusters = intermediates.get("gap_n_clusters", 1)
-    gap_info = intermediates.get("gap_info", {})
     width = params["width"]; height = params["height"]
     # dynamic window values (col-aware)
     Xc = intermediates.get("window_Xc", params["ex_Xc"])
@@ -334,7 +353,6 @@ def save_debug_composite(path: Path, bgr_orig: np.ndarray, intermediates: dict,
     chosen_s = f"{colaware_peaks[colaware_chosen]}" if colaware_chosen is not None and colaware_chosen < len(colaware_peaks) else "none"
     colaware_label = f"09 Column Profile\n{len(colaware_peaks)} peaks gap={gap_s} chosen={chosen_s}"
     win_label = f"10 Window dynamic\n{L}x{H} @({Xc},{Yc}) orig{L_orig}x{H_orig}@{params['ex_Xc']},{params['ex_Yc']}"
-    gap_label = f"Gap filter eps{params.get('gap_eps',14)}" if gap_n_clusters>1 else "Gap filter (single)"
     panels = [
         (bgr2rgb(bgr_orig), "01 Original\n(full res)", False),
         (bgr2rgb(bgr_resized), f"02 Resized {width}x{height}\n(pipeline input)", False),
@@ -348,10 +366,9 @@ def save_debug_composite(path: Path, bgr_orig: np.ndarray, intermediates: dict,
         (bgr2rgb(window_img), win_label, False),
         (bgr2rgb(nh_img), f"11 Inside Window\nYELLOW nh={n_nh} | before IF", False),
         (bgr2rgb(iso_img), f"12 {iso_label}\nYELLOW in={n_iso_in} RED out={n_iso_out}", False),
-        (bgr2rgb(gap_img), f"13 {gap_label}\nYELLOW kept={n_gap_in} MAGENTA removed={n_gap_out} clusters={gap_n_clusters}", False),
-        (bgr2rgb(raw_line_img), "14 Raw fitLine (gap-kept)\nBLUE infinite", False),
-        (bgr2rgb(clipped_line_img), "15 Clipped AvgLine (gap-kept)\nRED", False),
-        (bgr2rgb(final_img), "16 Final Result\nGREEN all + YEL kept + RED/MAG", False),
+        (bgr2rgb(raw_line_img), "13 Raw fitLine (inliers)\nBLUE infinite", False),
+        (bgr2rgb(clipped_line_img), "14 Clipped AvgLine (inliers)\nRED", False),
+        (bgr2rgb(final_img), "15 Final Result\nGREEN all + YEL inliers + RED", False),
     ]
 
     fig, axes = plt.subplots(5, 4, figsize=(28,24), constrained_layout=True)
@@ -365,8 +382,8 @@ def save_debug_composite(path: Path, bgr_orig: np.ndarray, intermediates: dict,
         ax.set_title(title, fontsize=7, pad=3)
         ax.axis("off")
 
-    # 17 Rejection Log
-    ax_log = axes_flat[16]
+    # 16 Rejection Log
+    ax_log = axes_flat[15]
     ax_log.axis("off")
     log_text = "=== REJECTION LOG ===\n"
     if not rejection_log:
@@ -383,10 +400,10 @@ def save_debug_composite(path: Path, bgr_orig: np.ndarray, intermediates: dict,
     ax_log.text(0.02,0.98, log_text, transform=ax_log.transAxes, va="top", ha="left",
                 fontsize=7, family="monospace",
                 bbox=dict(facecolor="lightyellow", alpha=0.95, edgecolor="gray", boxstyle="round,pad=0.4"))
-    ax_log.set_title("17 Rejection / Notes", fontsize=8)
+    ax_log.set_title("16 Rejection / Notes", fontsize=8)
 
-    # 18 Summary
-    ax_sum = axes_flat[17]
+    # 17 Summary
+    ax_sum = axes_flat[16]
     ax_sum.axis("off")
     def fmt(k):
         v = timings.get(k,0)
@@ -414,12 +431,12 @@ def save_debug_composite(path: Path, bgr_orig: np.ndarray, intermediates: dict,
     ax_sum.text(0.02,0.98, summary, transform=ax_sum.transAxes, va="top", ha="left",
                 fontsize=7, family="monospace",
                 bbox=dict(facecolor="white", alpha=0.9, edgecolor="gray", boxstyle="round,pad=0.4"))
-    ax_sum.set_title("18 Summary", fontsize=8)
-    # hide remaining cells 19-20 (20 cells total, used 0-17)
-    for idx in [18,19]:
+    ax_sum.set_title("17 Summary", fontsize=8)
+    # hide remaining cells 18-20 (20 cells total, used 0-16)
+    for idx in [17,18,19]:
         axes_flat[idx].axis("off")
 
-    fig.suptitle(f"VCRN DEBUG — {stem}  |  ONE line + IF + column-aware window  |  Stage-by-stage",
+    fig.suptitle(f"VCRN DEBUG — {stem}  |  ONE line + IF + column-aware window (KMeans removed)  |  Stage-by-stage",
                  fontsize=13, fontweight="bold", y=1.01)
     fig.savefig(str(path), dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -636,54 +653,19 @@ def process_image(path: Path, params: dict, out_dir: Path):
         cv2.circle(iso_img, (int(round(x)), int(round(y))), 7, (0,0,255), 1)
     timings["iso"] = (time.perf_counter()-t0)*1000
 
-    # 5c Gap-based multi-row filter inside window (keep central cluster)
-    t0 = time.perf_counter()
+    # 5c Gap filter removed per user request - stick to Isolation Forest only (KMeans removed)
+    # KMeans gap-based multi-row filter disabled; Isolation Forest remains the sole anomaly filter inside window
     gap_kept = iso_inliers
     gap_removed = []
     gap_n_clusters = 1
-    gap_info = {}
-    gap_img = bgr_resized.copy()
-    cv2.rectangle(gap_img, (int(Xc - L/2), int(Yc - H/2)), (int(Xc + L/2), int(Yc + H/2)), (255,204,102), 2)
-    for (x,y) in outside_points:
-        cv2.circle(gap_img, (int(round(x)), int(round(y))), 2, (70,70,70), cv2.FILLED)
-    # also draw iso outliers as small red for context
-    for (x,y) in iso_outliers:
-        cv2.circle(gap_img, (int(round(x)), int(round(y))), 3, (0,0,255), cv2.FILLED)
-    if params.get("gap_enabled", True) and len(iso_inliers) >= params.get("gap_min_points", 12):
-        kept, removed, n_clust, labels, info = filter_gap_clusters(iso_inliers, Xc, params)
-        gap_kept = kept
-        gap_removed = removed
-        gap_n_clusters = n_clust
-        gap_info = info
-        if n_clust > 1:
-            # uniform gap evident: keep central, remove farther
-            gap_median = info.get("kept_median", 0)
-            gap_max = info.get("max_gap", 0)
-            rejection_log.append(f"Gap filter (eps={info.get('eps',14)}): {n_clust} row clusters inside window (max_gap={gap_max:.0f}px) -> kept {len(kept)}/{len(iso_inliers)} near Xc={Xc} median {gap_median:.0f}, removed {len(removed)} farther row(s)")
-        else:
-            rejection_log.append(f"Gap filter: {n_clust} cluster(s) (no uniform gap) -> kept all {len(kept)}/{len(iso_inliers)}")
-        # visualize: kept yellow, removed magenta
-        for (x,y) in gap_kept:
-            cv2.circle(gap_img, (int(round(x)), int(round(y))), 5, (0,204,255), cv2.FILLED)
-        for (x,y) in gap_removed:
-            cv2.circle(gap_img, (int(round(x)), int(round(y))), 5, (255,0,255), cv2.FILLED)
-            cv2.circle(gap_img, (int(round(x)), int(round(y))), 7, (255,0,255), 1)
-    else:
-        if len(iso_inliers) < params.get("gap_min_points", 12):
-            rejection_log.append(f"Gap filter skipped: n_inliers={len(iso_inliers)} < gap_min_points={params.get('gap_min_points',12)}")
-        elif not params.get("gap_enabled", True):
-            rejection_log.append("Gap filter disabled")
-        # visualize all as kept
-        for (x,y) in gap_kept:
-            cv2.circle(gap_img, (int(round(x)), int(round(y))), 5, (0,204,255), cv2.FILLED)
-        gap_n_clusters = 1
-        gap_info = {"n_clusters":1}
-    timings["gap"] = (time.perf_counter()-t0)*1000
-    # final inliers for fitLine = gap_kept
+    gap_info = {"reason": "KMeans removed per user request - stick to IF only", "n_clusters": 1}
+    gap_img = iso_img.copy()
+    n_gap_in = n_iso_in
+    n_gap_out = 0
+    timings["gap"] = 0.0
+    rejection_log.append("Gap filter KMeans removed per user request - stick to Isolation Forest only")
     final_inliers = gap_kept
-    final_outliers = iso_outliers + gap_removed
-    n_gap_in = len(gap_kept)
-    n_gap_out = len(gap_removed)
+    final_outliers = iso_outliers
 
     # 6 FitLineOnContures (on gap-kept inliers)
     t0 = time.perf_counter()
